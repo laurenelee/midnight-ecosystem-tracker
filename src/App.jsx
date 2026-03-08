@@ -428,10 +428,7 @@ export default function App() {
   const newThisWeek = dedupedAll.filter((r) => isNew(r.created_at));
   newThisWeek.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-  const totalNew = SEARCHES.reduce((acc, s) => {
-    const repos = results[s.id] || [];
-    return acc + repos.filter((r) => isNew(r.created_at)).length;
-  }, 0);
+  const totalNew = newThisWeek.length;
 
   const activeThisWeek = dedupedAll.filter((r) => isActive(r.updated_at));
   activeThisWeek.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
