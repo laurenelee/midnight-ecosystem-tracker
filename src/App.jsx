@@ -55,7 +55,7 @@ async function fetchRepos(query) {
   const weekAgo = getWeekAgo();
   const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(
     query
-  )}&sort=updated&order=desc&per_page=30`;
+  )}&sort=updated&order=desc&per_page=100`;
   const res = await fetch(url, {
     headers: { Accept: "application/vnd.github+json" },
   });
@@ -583,32 +583,39 @@ export default function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(4, 1fr)",
             gap: 12,
             marginBottom: 24,
           }}
         >
           {[
             {
-              label: "Total Repos Found",
-              value: dedupedAll.length || "...",
-              icon: "📦",
+              label: "midnightntwrk Repos",
+              value: (results["midnightntwrk"] || []).length || (loading["midnightntwrk"] ? "..." : "0"),
+              icon: "🌑",
               color: "#7C3AED",
+              tooltip: "Repos tagged with the official midnightntwrk topic",
+            },
+            {
+              label: "Total (All Searches)",
+              value: dedupedAll.length || (Object.values(loading).some(Boolean) ? "..." : "0"),
+              icon: "📦",
+              color: "#5B21B6",
+              tooltip: "Deduplicated across all three search tracks",
             },
             {
               label: "New This Week",
-              value: totalNew || (Object.values(loading).some(Boolean) ? "..." : "0"),
+              value: newThisWeek.length || (Object.values(loading).some(Boolean) ? "..." : "0"),
               icon: "✨",
               color: "#0E7490",
+              tooltip: "Repos created in the last 7 days",
             },
             {
-              label: "Week of",
-              value: new Date().toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              }),
-              icon: "📅",
+              label: "Active This Week",
+              value: activeThisWeek.length || (Object.values(loading).some(Boolean) ? "..." : "0"),
+              icon: "⚡",
               color: "#1D4ED8",
+              tooltip: "Repos with commits or updates in the last 7 days",
             },
           ].map((stat) => (
             <div
@@ -620,6 +627,7 @@ export default function App() {
                 padding: "14px 18px",
                 borderTop: `2px solid ${stat.color}`,
               }}
+              title={stat.tooltip}
             >
               <div style={{ fontSize: 18, marginBottom: 4 }}>{stat.icon}</div>
               <div
