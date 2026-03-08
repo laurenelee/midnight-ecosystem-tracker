@@ -51,17 +51,37 @@ function isActive(dateStr) {
   return new Date(dateStr) >= new Date(getWeekAgo());
 }
 
-async function fetchRepos(query) {
-  const weekAgo = getWeekAgo();
-  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(
+async function fetchRepos(query, token = "") {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const firstUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(
     query
-  )}&sort=updated&order=desc&per_page=100`;
-  const res = await fetch(url, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
-  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-  const data = await res.json();
-  return data.items || [];
+  )}&sort=updated&order=desc&per_page=100&page=1`;
+
+  const firstRes = await fetch(firstUrl, { headers });
+  if (!firstRes.ok) throw new Error(`GitHub API error: ${firstRes.status}`);
+  const firstData = await firstRes.json();
+
+  const totalCount = firstData.total_count || 0;
+  let allItems = firstData.items || [];
+
+  // GitHub search API caps at 1000 results (10 pages of 100)
+  const totalPages = Math.min(Math.ceil(totalCount / 100), 10);
+
+  for (let page = 2; page <= totalPages; page++) {
+    const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(
+      query
+    )}&sort=updated&order=desc&per_page=100&page=${page}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) break;
+    const data = await res.json();
+    allItems = [...allItems, ...(data.items || [])];
+  }
+
+  return allItems;
 }
 
 function RepoCard({ repo, isNewRepo, accent }) {
@@ -605,7 +625,7 @@ export default function App() {
             },
             {
               label: "New This Week",
-              value: newThisWeek.length || (Object.values(loading).some(Boolean) ? "..." : "0"),
+              value: totalNew || (Object.values(loading).some(Boolean) ? "..." : "0"),
               icon: "✨",
               color: "#0E7490",
               tooltip: "Repos created in the last 7 days",
