@@ -25,13 +25,26 @@ const SEARCHES = [
     color: "#1D4ED8",
     accent: "#60A5FA",
   },
+  {
+    id: "midnight-name",
+    label: "midnight (name+readme)",
+    description: "Keyword: 'midnight' in name OR 'midnight network' in readme (GitHub treats as OR)",
+    query: 'midnight in:name "midnight network" in:readme',
+    color: "#B45309",
+    accent: "#FCD34D",
+  },
+  {
+    id: "compact-keyword",
+    label: "compact+midnight",
+    description: "Keyword: exact phrase 'midnight network' + compact",
+    query: '"midnight network" compact',
+    color: "#BE185D",
+    accent: "#F9A8D4",
+  },
 ];
 
-function getWeekAgo() {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  return d.toISOString().split("T")[0];
-}
+// Fixed anchor: EC submission date
+const EC_SUBMISSION_DATE = "2026-03-06";
 
 function timeAgo(dateStr) {
   const now = new Date();
@@ -44,11 +57,13 @@ function timeAgo(dateStr) {
 }
 
 function isNew(dateStr) {
-  return new Date(dateStr) >= new Date(getWeekAgo());
+  return new Date(dateStr) >= new Date(EC_SUBMISSION_DATE);
 }
 
 function isActive(dateStr) {
-  return new Date(dateStr) >= new Date(getWeekAgo());
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  return new Date(dateStr) >= weekAgo;
 }
 
 async function fetchRepos(query, token = "") {
@@ -222,17 +237,17 @@ function RepoCard({ repo, isNewRepo, accent }) {
               style={{
                 fontSize: 10,
                 color:
-                  t === "midnightntwrk" || t === "midnight" || t === "compact"
+                  t === "midnightntwrk" || t === "midnight" || t === "compact" || t === "compact-framework"
                     ? accent
                     : "#475569",
                 background:
-                  t === "midnightntwrk" || t === "midnight" || t === "compact"
+                  t === "midnightntwrk" || t === "midnight" || t === "compact" || t === "compact-framework"
                     ? "rgba(167,139,250,0.1)"
                     : "rgba(255,255,255,0.04)",
                 padding: "2px 6px",
                 borderRadius: 4,
                 border:
-                  t === "midnightntwrk" || t === "midnight" || t === "compact"
+                  t === "midnightntwrk" || t === "midnight" || t === "compact" || t === "compact-framework"
                     ? "1px solid rgba(167,139,250,0.2)"
                     : "1px solid rgba(255,255,255,0.06)",
               }}
@@ -288,7 +303,7 @@ function SearchPanel({ search, repos, loading, error, newCount }) {
               fontFamily: "'JetBrains Mono', monospace",
             }}
           >
-            topic:{search.label}
+            {search.query.startsWith("topic:") ? `topic:${search.label}` : search.query}
           </span>
           <span style={{ fontSize: 11, color: "#64748B" }}>
             {search.description}
@@ -405,7 +420,8 @@ export default function App() {
       setErrors((prev) => ({ ...prev, [s.id]: null }));
       try {
         const repos = await fetchRepos(s.query);
-        setResults((prev) => ({ ...prev, [s.id]: repos }));
+        const filtered = s.filter ? repos.filter(s.filter) : repos;
+        setResults((prev) => ({ ...prev, [s.id]: filtered }));
       } catch (e) {
         setErrors((prev) => ({ ...prev, [s.id]: e.message }));
       } finally {
@@ -430,12 +446,18 @@ export default function App() {
 
   const totalNew = newThisWeek.length;
 
+  // Rolling 7-day window for weekly velocity tracking
+  const weekAgo7 = new Date();
+  weekAgo7.setDate(weekAgo7.getDate() - 7);
+  const newLast7Days = dedupedAll.filter((r) => new Date(r.created_at) >= weekAgo7);
+  const totalNew7 = newLast7Days.length;
+
   const activeThisWeek = dedupedAll.filter((r) => isActive(r.updated_at));
   activeThisWeek.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
   const tabs = [
     { id: "all", label: "All Searches" },
-    { id: "new", label: `New This Week (${newThisWeek.length})` },
+    { id: "new", label: `New Since Mar 6 (${newThisWeek.length})` },
     { id: "active", label: `Active This Week (${activeThisWeek.length})` },
   ];
 
@@ -470,7 +492,7 @@ export default function App() {
           zIndex: 100,
         }}
       >
-        <div style={{ maxWidth: 860, margin: "0 auto", padding: "14px 24px" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "14px 40px" }}>
           <div
             style={{
               display: "flex",
@@ -595,7 +617,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "24px" }}>
+      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 40px" }}>
         {/* Stats bar */}
         <div
           style={{
@@ -618,14 +640,21 @@ export default function App() {
               value: dedupedAll.length || (Object.values(loading).some(Boolean) ? "..." : "0"),
               icon: "📦",
               color: "#5B21B6",
-              tooltip: "Deduplicated across all three search tracks",
+              tooltip: "Deduplicated across all five search tracks",
             },
             {
-              label: "New This Week",
+              label: "New Since Mar 6",
               value: totalNew || (Object.values(loading).some(Boolean) ? "..." : "0"),
               icon: "✨",
               color: "#0E7490",
-              tooltip: "Repos created in the last 7 days",
+              tooltip: "Repos created since EC submission on March 6 (cumulative pipeline)",
+            },
+            {
+              label: "New Last 7 Days",
+              value: totalNew7 || (Object.values(loading).some(Boolean) ? "..." : "0"),
+              icon: "📈",
+              color: "#065F46",
+              tooltip: "Repos created in the rolling 7-day window (log Sundays for weekly velocity)",
             },
             {
               label: "Active This Week",
@@ -729,7 +758,7 @@ export default function App() {
                   fontSize: 13,
                 }}
               >
-                No new repos created in the last 7 days across all searches.
+                No new repos created since March 6 across all searches.
               </div>
             ) : Object.values(loading).some(Boolean) ? (
               <div
