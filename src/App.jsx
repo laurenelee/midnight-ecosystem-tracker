@@ -19,17 +19,17 @@ const SEARCHES = [
   },
   {
     id: "midnight",
-    label: "midnight",
-    description: "Midnight topic tag",
+    label: "midnight + zk",
+    description: "topic:midnight with zk keyword filter",
     query: "topic:midnight zk",
     color: "#1D4ED8",
     accent: "#60A5FA",
   },
   {
     id: "midnight-name",
-    label: "midnight (name+readme)",
-    description: "Keyword: 'midnight' in name OR 'midnight network' in readme (GitHub treats as OR)",
-    query: 'midnight in:name "midnight network" in:readme',
+    label: "midnight network (readme)",
+    description: "Keyword: exact phrase 'midnight network' in readme",
+    query: '"midnight network" in:readme',
     color: "#B45309",
     accent: "#FCD34D",
   },
@@ -406,14 +406,22 @@ function SearchPanel({ search, repos, loading, error, newCount, cacheEntry }) {
           {!loading &&
             !error &&
             repos &&
-            repos.map((repo) => (
-              <RepoCard
-                key={repo.id}
-                repo={repo}
-                isNewRepo={isNew(repo.created_at)}
-                accent={search.accent}
-              />
-            ))}
+            [...repos]
+              .sort((a, b) => {
+                const aNew = isNew(a.created_at);
+                const bNew = isNew(b.created_at);
+                if (aNew && !bNew) return -1;
+                if (!aNew && bNew) return 1;
+                return new Date(b.created_at) - new Date(a.created_at);
+              })
+              .map((repo) => (
+                <RepoCard
+                  key={repo.id}
+                  repo={repo}
+                  isNewRepo={isNew(repo.created_at)}
+                  accent={search.accent}
+                />
+              ))}
         </div>
       )}
     </div>
