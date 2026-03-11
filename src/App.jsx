@@ -33,15 +33,22 @@ const SEARCHES = [
     color: "#B45309",
     accent: "#FCD34D",
   },
-  {
-    id: "compact-keyword",
-    label: "compact+midnight",
-    description: "Keyword: exact phrase 'midnight network' + compact",
-    query: '"midnight network" compact',
-    color: "#BE185D",
-    accent: "#F9A8D4",
-  },
 ];
+
+// In-memory cache: { [searchId]: { repos: [], fetchedAt: Date } }
+const CACHE = {};
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function getCached(id) {
+  const entry = CACHE[id];
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > CACHE_TTL_MS) return null;
+  return entry;
+}
+
+function setCached(id, repos) {
+  CACHE[id] = { repos, fetchedAt: Date.now() };
+}
 
 // Fixed anchor: EC submission date
 const EC_SUBMISSION_DATE = "2026-03-06";
@@ -261,8 +268,12 @@ function RepoCard({ repo, isNewRepo, accent }) {
   );
 }
 
-function SearchPanel({ search, repos, loading, error, newCount }) {
+function SearchPanel({ search, repos, loading, error, newCount, cacheEntry }) {
   const [expanded, setExpanded] = useState(true);
+
+  const cacheAge = cacheEntry
+    ? Math.floor((Date.now() - cacheEntry.fetchedAt) / 60000)
+    : null;
   return (
     <div
       style={{
@@ -327,6 +338,11 @@ function SearchPanel({ search, repos, loading, error, newCount }) {
           {!loading && repos && (
             <span style={{ fontSize: 11, color: "#475569" }}>
               {repos.length} repos
+              {cacheEntry && (
+                <span style={{ color: cacheEntry.fromCache ? "#22D3EE" : "#4ADE80", marginLeft: 5 }}>
+                  {cacheEntry.fromCache ? `· cached ${cacheAge}m ago` : "· fresh"}
+                </span>
+              )}
             </span>
           )}
           <span style={{ color: "#475569", fontSize: 12 }}>
@@ -409,38 +425,63 @@ export default function App() {
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
   const [lastRun, setLastRun] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({}); // { [id]: { fromCache: bool, fetchedAt: Date } }
+  const [cooldownUntil, setCooldownUntil] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
   const [token, setToken] = useState("");
   const [showTokenInput, setShowTokenInput] = useState(false);
 
-  const runSearches = useCallback(async () => {
+  const runSearches = useCallback(async (forceRefresh = false) => {
     setLastRun(new Date());
     for (const s of SEARCHES) {
+      // Check cache first unless forcing refresh
+      if (!forceRefresh) {
+        const cached = getCached(s.id);
+        if (cached) {
+          setResults((prev) => ({ ...prev, [s.id]: cached.repos }));
+          setCacheInfo((prev) => ({ ...prev, [s.id]: { fromCache: true, fetchedAt: cached.fetchedAt } }));
+          continue;
+        }
+      }
       setLoading((prev) => ({ ...prev, [s.id]: true }));
       setErrors((prev) => ({ ...prev, [s.id]: null }));
       try {
-        const repos = await fetchRepos(s.query);
+        const repos = await fetchRepos(s.query, token);
         const filtered = s.filter ? repos.filter(s.filter) : repos;
+        // Sort newest-first by updated_at within each track
+        filtered.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        setCached(s.id, filtered);
         setResults((prev) => ({ ...prev, [s.id]: filtered }));
+        setCacheInfo((prev) => ({ ...prev, [s.id]: { fromCache: false, fetchedAt: Date.now() } }));
       } catch (e) {
         setErrors((prev) => ({ ...prev, [s.id]: e.message }));
       } finally {
         setLoading((prev) => ({ ...prev, [s.id]: false }));
       }
     }
-  }, []);
+  }, [token]);
+
+  const handleForceRefresh = useCallback(() => {
+    setCooldownUntil(Date.now() + 10 * 60 * 1000); // 10 min cooldown after force refresh
+    runSearches(true);
+  }, [runSearches]);
 
   useEffect(() => {
-    runSearches();
+    runSearches(false);
   }, [runSearches]);
+
+  const cooldownRemaining = cooldownUntil ? Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60000)) : 0;
+  const inCooldown = cooldownUntil && Date.now() < cooldownUntil;
 
   const allRepos = Object.values(results).flat();
   const seen = new Set();
-  const dedupedAll = allRepos.filter((r) => {
-    if (seen.has(r.id)) return false;
-    seen.add(r.id);
-    return true;
-  });
+  const dedupedAll = allRepos
+    .filter((r) => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    })
+    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
   const newThisWeek = dedupedAll.filter((r) => isNew(r.created_at));
   newThisWeek.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -537,6 +578,9 @@ export default function App() {
               {lastRun && (
                 <span style={{ fontSize: 11, color: "#475569" }}>
                   Last run: {lastRun.toLocaleTimeString()}
+                  {Object.values(cacheInfo).some(c => c.fromCache) && (
+                    <span style={{ color: "#22D3EE", marginLeft: 5 }}>(cached)</span>
+                  )}
                 </span>
               )}
               <button
@@ -554,24 +598,46 @@ export default function App() {
                 🔑 Token
               </button>
               <button
-                onClick={runSearches}
+                onClick={() => runSearches(false)}
                 disabled={Object.values(loading).some(Boolean)}
+                title="Serve from cache if available (30 min TTL)"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)",
-                  border: "none",
-                  color: "#fff",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#94A3B8",
                   fontSize: 11,
                   fontWeight: 600,
                   padding: "6px 14px",
                   borderRadius: 6,
                   cursor: "pointer",
-                  opacity: Object.values(loading).some(Boolean) ? 0.6 : 1,
+                  opacity: Object.values(loading).some(Boolean) ? 0.5 : 1,
+                }}
+              >
+                ↻ Refresh
+              </button>
+              <button
+                onClick={handleForceRefresh}
+                disabled={Object.values(loading).some(Boolean) || inCooldown}
+                title={inCooldown ? `Force refresh available in ~${cooldownRemaining}m` : "Force fresh data from GitHub API"}
+                style={{
+                  background: inCooldown
+                    ? "rgba(124,58,237,0.2)"
+                    : "linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)",
+                  border: "none",
+                  color: inCooldown ? "#7C3AED" : "#fff",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  cursor: inCooldown ? "not-allowed" : "pointer",
+                  opacity: (Object.values(loading).some(Boolean) || inCooldown) ? 0.6 : 1,
                 }}
               >
                 {Object.values(loading).some(Boolean)
-                  ? "Searching..."
-                  : "↻ Refresh"}
+                  ? "Fetching..."
+                  : inCooldown
+                  ? `⏳ ~${cooldownRemaining}m`
+                  : "⚡ Force Refresh"}
               </button>
             </div>
           </div>
@@ -743,6 +809,7 @@ export default function App() {
               newCount={(results[s.id] || []).filter((r) =>
                 isNew(r.created_at)
               ).length}
+              cacheEntry={cacheInfo[s.id]}
             />
           ))}
 
